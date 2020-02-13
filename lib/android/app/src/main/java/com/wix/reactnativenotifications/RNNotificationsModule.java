@@ -15,13 +15,12 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule;
 import com.facebook.react.bridge.ReactMethod;
 import com.facebook.react.bridge.ReadableArray;
 import com.facebook.react.bridge.ReadableMap;
+import com.facebook.react.bridge.WritableMap;
 import com.wix.reactnativenotifications.core.AppLifecycleFacadeHolder;
-import com.wix.reactnativenotifications.core.InitialNotificationHolder;
 import com.wix.reactnativenotifications.core.NotificationIntentAdapter;
 import com.wix.reactnativenotifications.core.ReactAppLifecycleFacade;
 import com.wix.reactnativenotifications.core.notification.IPushNotification;
 import com.wix.reactnativenotifications.core.notification.PushNotification;
-import com.wix.reactnativenotifications.core.notification.PushNotificationProps;
 import com.wix.reactnativenotifications.core.notificationdrawer.IPushNotificationsDrawer;
 import com.wix.reactnativenotifications.core.notificationdrawer.PushNotificationsDrawer;
 import com.wix.reactnativenotifications.fcm.FcmInstanceIdRefreshHandlerService;
@@ -76,20 +75,45 @@ public class RNNotificationsModule extends ReactContextBaseJavaModule implements
     }
 
     @ReactMethod
-    public void getInitialNotification(final Promise promise) {
-        Log.d(LOGTAG, "Native method invocation: getInitialNotification");
-        Object result = null;
-
-        try {
-            final PushNotificationProps notification = InitialNotificationHolder.getInstance().get();
-            if (notification == null) {
-                return;
-            }
-
-            result = Arguments.fromBundle(notification.asBundle());
-        } finally {
-            promise.resolve(result);
+    public void getInitialNotification(Promise promise) {
+        WritableMap notificationOpenMap = null;
+        if (getCurrentActivity() != null) {
+            notificationOpenMap = parseIntentForRemoteNotification(getCurrentActivity().getIntent());
         }
+        promise.resolve(notificationOpenMap);
+    }
+
+    private WritableMap parseIntentForRemoteNotification(Intent intent) {
+        // Check if FCM data exists
+        if (intent.getExtras() == null || !intent.hasExtra("google.message_id")) {
+            return null;
+        }
+
+        Bundle extras = intent.getExtras();
+
+        WritableMap notificationMap = Arguments.createMap();
+        WritableMap dataMap = Arguments.createMap();
+
+        for (String key : extras.keySet()) {
+            if (key.equals("google.message_id")) {
+                notificationMap.putString("notificationId", extras.getString(key));
+            } else if (key.equals("collapse_key")
+                    || key.equals("from")
+                    || key.equals("google.sent_time")
+                    || key.equals("google.ttl")
+                    || key.equals("_fbSourceApplicationHasBeenSet")) {
+                // ignore known unneeded fields
+            } else {
+                dataMap.putString(key, extras.getString(key));
+            }
+        }
+        notificationMap.putMap("data", dataMap);
+
+        WritableMap notificationOpenMap = Arguments.createMap();
+        notificationOpenMap.putString("action", intent.getAction());
+        notificationOpenMap.putMap("notification", notificationMap);
+
+        return notificationOpenMap;
     }
 
     @ReactMethod
@@ -108,9 +132,9 @@ public class RNNotificationsModule extends ReactContextBaseJavaModule implements
 
     @ReactMethod
     public void setCategories(ReadableArray categories) {
-    
+
     }
-    
+
     public void cancelDeliveredNotification(String tag, int notificationId) {
         IPushNotificationsDrawer notificationsDrawer = PushNotificationsDrawer.get(getReactApplicationContext().getApplicationContext());
         notificationsDrawer.onNotificationClearRequest(tag, notificationId);
@@ -122,7 +146,8 @@ public class RNNotificationsModule extends ReactContextBaseJavaModule implements
         promise.resolve(new Boolean(hasPermission));
     }
 
-    @ReactMethod void removeAllDeliveredNotifications() {
+    @ReactMethod
+    void removeAllDeliveredNotifications() {
         IPushNotificationsDrawer notificationsDrawer = PushNotificationsDrawer.get(getReactApplicationContext().getApplicationContext());
         notificationsDrawer.onAllNotificationsClearRequest();
     }
